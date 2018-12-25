@@ -11,5 +11,8 @@ public:
     static NAN_GETTER(HandleGetters);
     static NAN_SETTER(HandleSetters);
 
+    // Additional method to save with hard-coded filename
+    static NAN_METHOD(Save);
+
     static Nan::Persistent<v8::FunctionTemplate> constructor;
 };

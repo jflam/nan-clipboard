@@ -1,4 +1,7 @@
 #include "Vector.h"
+#include <comdef.h>
+#include <windows.h>
+#include <wincodec.h>
 
 Nan::Persistent<v8::FunctionTemplate> Vector::constructor;
 
@@ -14,11 +17,13 @@ NAN_MODULE_INIT(Vector::Init) {
   Nan::SetAccessor(ctor->InstanceTemplate(), Nan::New("z").ToLocalChecked(), Vector::HandleGetters, Vector::HandleSetters);
 
   Nan::SetPrototypeMethod(ctor, "add", Add);
+  Nan::SetPrototypeMethod(ctor, "save", Save);
 
   target->Set(Nan::New("Vector").ToLocalChecked(), ctor->GetFunction());
 }
 
 NAN_METHOD(Vector::New) {
+
   // throw an error if constructor is called without new keyword
   if(!info.IsConstructCall()) {
     return Nan::ThrowError(Nan::New("Vector::New - called without new keyword").ToLocalChecked());
@@ -104,4 +109,124 @@ NAN_SETTER(Vector::HandleSetters) {
   } else if (propertyName == "z") {
     self->z = value->NumberValue();
   }
+}
+
+NAN_METHOD(Vector::Save) {
+    if (!OpenClipboard(NULL)) {
+        return;
+    }
+
+    HANDLE hBitmap = GetClipboardData(CF_BITMAP);
+    if (hBitmap != NULL) {
+      // Get dimensions of the bitmap
+      BITMAP bm;
+      GetObject(hBitmap, sizeof(bm), &bm);
+      char buffer[255];
+      sprintf(buffer, "width = %i, height = %i\n", bm.bmWidth, bm.bmHeight);
+      printf(buffer);
+
+      // COM Fun
+      HRESULT hr = CoInitialize(NULL);
+      IWICImagingFactory* ipFactory = NULL;
+      hr = CoCreateInstance(CLSID_WICImagingFactory, 
+                            NULL, 
+                            CLSCTX_INPROC_SERVER, 
+                            IID_IWICImagingFactory, 
+                            reinterpret_cast<void**>(&ipFactory));
+      if (SUCCEEDED(hr)) {
+        printf("Got a reference to the WIC component\n");
+
+        IWICBitmap* ipBitmap = NULL;
+        hr = ipFactory->CreateBitmapFromHBITMAP(reinterpret_cast<HBITMAP>(hBitmap), 
+                                                NULL, 
+                                                WICBitmapIgnoreAlpha, 
+                                                &ipBitmap);
+        if (SUCCEEDED(hr)) {
+          printf("Converted into a IWICBitmap!\n");
+
+          // Now let's look around
+
+          UINT width, height;
+          hr = ipBitmap->GetSize(&width, &height);
+          sprintf(buffer, "width = %i, height = %i\n", width, height);
+          printf(buffer);
+
+          // Now let's get a PngEncoder
+          IWICBitmapEncoder* ipBitmapEncoder = NULL;
+          hr = ipFactory->CreateEncoder(GUID_ContainerFormatPng,
+                                        NULL,
+                                        &ipBitmapEncoder);
+          if (SUCCEEDED(hr)) {
+            printf("Got a reference to a PNG encoder\n");
+
+            IWICStream* ipStream = NULL;
+            hr = ipFactory->CreateStream(&ipStream);
+            if (SUCCEEDED(hr)) {
+              printf("Created an IWICStream from the encoder\n");
+              hr = ipStream->InitializeFromFilename(L"./output.png", GENERIC_WRITE);
+              if (SUCCEEDED(hr)) {
+                printf("Initialized with a backing file\n");
+                hr = ipBitmapEncoder->Initialize(ipStream, WICBitmapEncoderNoCache);
+                if (SUCCEEDED(hr)) {
+                  printf("Initialized the encoder with the stream and telling it to write to the image file!\n");
+                  IWICBitmapFrameEncode* ipFrameEncoder = NULL;
+                  hr = ipBitmapEncoder->CreateNewFrame(&ipFrameEncoder, NULL);
+                  if (SUCCEEDED(hr)) {
+                    printf("Got a IWICBitmapFrameEncode interface\n");
+                    hr = ipFrameEncoder->Initialize(NULL);
+                    if (SUCCEEDED(hr)) {
+                      printf("Initialized the frame encoder\n");
+                      hr = ipFrameEncoder->SetSize(bm.bmWidth, bm.bmHeight);
+                      if (SUCCEEDED(hr))
+                      {
+                        printf("set size succeeded");
+                        // TODO: const_cast?
+                        WICPixelFormatGUID formatGuid = GUID_WICPixelFormat24bppBGR;
+                        hr = ipFrameEncoder->SetPixelFormat(&formatGuid);
+                        if (SUCCEEDED(hr))
+                        {
+                          printf("set pixel format to RGB 8 bits per channel\n");
+                          hr = ipFrameEncoder->WriteSource(ipBitmap, NULL);
+                          if (SUCCEEDED(hr))
+                          {
+                            printf("set write source to the IWICBitamp object\n");
+                            hr = ipFrameEncoder->Commit();
+                            if (SUCCEEDED(hr))
+                            {
+                              printf("committed the frame encoder\n");
+                              hr = ipBitmapEncoder->Commit();
+                              if (SUCCEEDED(hr))
+                              {
+                                printf("committed the bitmap encoder\n");
+                              }
+                            }
+                          }
+                        }
+                      }
+                      else
+                      {
+                        printf("uh oh\n");
+                        _com_error err(hr);
+                        LPCTSTR errMsg = err.ErrorMessage();
+                        printf(errMsg);
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        } else {
+          _com_error err(hr);
+          LPCTSTR errMsg = err.ErrorMessage();
+          printf(errMsg);
+        }
+        ipFactory->Release();
+      }
+      CoUninitialize();
+    } else {
+      printf("No bitmap on clibpard\n");
+    }
+
+    return;
 }
