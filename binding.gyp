@@ -10,7 +10,7 @@
     ],
     "sources": [
       "src/index.cc",
-      "src/Vector.cc"
+      "src/Clipboard.cc"
     ]
   }]
 }

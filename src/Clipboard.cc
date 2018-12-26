@@ -1,4 +1,4 @@
-#include "Vector.h"
+#include "Clipboard.h"
 #include <comdef.h>
 #include <windows.h>
 #include <wincodec.h>
@@ -7,26 +7,20 @@
 
 using namespace v8;
 
-Nan::Persistent<v8::FunctionTemplate> Vector::constructor;
+Nan::Persistent<v8::FunctionTemplate> Clipboard::constructor;
 
-NAN_MODULE_INIT(Vector::Init) {
-  v8::Local<v8::FunctionTemplate> ctor = Nan::New<v8::FunctionTemplate>(Vector::New);
+NAN_MODULE_INIT(Clipboard::Init) {
+  v8::Local<v8::FunctionTemplate> ctor = Nan::New<v8::FunctionTemplate>(Clipboard::New);
   constructor.Reset(ctor);
   ctor->InstanceTemplate()->SetInternalFieldCount(1);
-  ctor->SetClassName(Nan::New("Vector").ToLocalChecked());
+  ctor->SetClassName(Nan::New("Clipboard").ToLocalChecked());
 
-  // link our getters and setter to the object property
-  Nan::SetAccessor(ctor->InstanceTemplate(), Nan::New("x").ToLocalChecked(), Vector::HandleGetters, Vector::HandleSetters);
-  Nan::SetAccessor(ctor->InstanceTemplate(), Nan::New("y").ToLocalChecked(), Vector::HandleGetters, Vector::HandleSetters);
-  Nan::SetAccessor(ctor->InstanceTemplate(), Nan::New("z").ToLocalChecked(), Vector::HandleGetters, Vector::HandleSetters);
-
-  Nan::SetPrototypeMethod(ctor, "add", Add);
   Nan::SetPrototypeMethod(ctor, "save", Save);
 
-  target->Set(Nan::New("Vector").ToLocalChecked(), ctor->GetFunction());
+  target->Set(Nan::New("Clipboard").ToLocalChecked(), ctor->GetFunction());
 }
 
-NAN_METHOD(Vector::New) {
+NAN_METHOD(Clipboard::New) {
 
   // throw an error if constructor is called without new keyword
   if(!info.IsConstructCall()) {
@@ -44,7 +38,7 @@ NAN_METHOD(Vector::New) {
   }
 
   // create a new instance and wrap our javascript instance
-  Vector* vec = new Vector();
+  Clipboard* vec = new Clipboard();
   vec->Wrap(info.Holder());
 
   // initialize it's values
@@ -54,65 +48,6 @@ NAN_METHOD(Vector::New) {
 
   // return the wrapped javascript instance
   info.GetReturnValue().Set(info.Holder());
-}
-
-NAN_METHOD(Vector::Add) {
-  // unwrap this Vector
-  Vector * self = Nan::ObjectWrap::Unwrap<Vector>(info.This());
-
-  if (!Nan::New(Vector::constructor)->HasInstance(info[0])) {
-    return Nan::ThrowError(Nan::New("Vector::Add - expected argument to be instance of Vector").ToLocalChecked());
-  }
-  // unwrap the Vector passed as argument
-  Vector * otherVec = Nan::ObjectWrap::Unwrap<Vector>(info[0]->ToObject());
-
-  // specify argument counts and constructor arguments
-  const int argc = 3;
-  v8::Local<v8::Value> argv[argc] = {
-    Nan::New(self->x + otherVec->x),
-    Nan::New(self->y + otherVec->y),
-    Nan::New(self->z + otherVec->z)
-  };
-
-  // get a local handle to our constructor function
-  v8::Local<v8::Function> constructorFunc = Nan::New(Vector::constructor)->GetFunction();
-  // create a new JS instance from arguments
-  v8::Local<v8::Object> jsSumVec = Nan::NewInstance(constructorFunc, argc, argv).ToLocalChecked();
-
-  info.GetReturnValue().Set(jsSumVec);
-}
-
-
-NAN_GETTER(Vector::HandleGetters) {
-  Vector* self = Nan::ObjectWrap::Unwrap<Vector>(info.This());
-
-  std::string propertyName = std::string(*Nan::Utf8String(property));
-  if (propertyName == "x") {
-    info.GetReturnValue().Set(self->x);
-  } else if (propertyName == "y") {
-    info.GetReturnValue().Set(self->y);
-  } else if (propertyName == "z") {
-    info.GetReturnValue().Set(self->z);
-  } else {
-    info.GetReturnValue().Set(Nan::Undefined());
-  }
-}
-
-NAN_SETTER(Vector::HandleSetters) {
-  Vector* self = Nan::ObjectWrap::Unwrap<Vector>(info.This());
-
-  if(!value->IsNumber()) {
-    return Nan::ThrowError(Nan::New("expected value to be a number").ToLocalChecked());
-  }
-
-  std::string propertyName = std::string(*Nan::Utf8String(property));
-  if (propertyName == "x") {
-    self->x = value->NumberValue();
-  } else if (propertyName == "y") {
-    self->y = value->NumberValue();
-  } else if (propertyName == "z") {
-    self->z = value->NumberValue();
-  }
 }
 
 std::wstring s2ws(const std::string& s)
@@ -127,7 +62,7 @@ std::wstring s2ws(const std::string& s)
     return r;
 }
 
-NAN_METHOD(Vector::Save) {
+NAN_METHOD(Clipboard::Save) {
     // Extract the filename parameter 
     // TODO: understand how to validate parameters, e.g., type, length etc.
     std::string temp = *v8::String::Utf8Value(info[0]->ToString());
