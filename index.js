@@ -2,5 +2,5 @@
 const m = require('./')
 
 const vec1 = new m.Clipboard()
-vec1.save('hi')
+vec1.writeBitmapToDisk('hi')
 console.log("made it here")

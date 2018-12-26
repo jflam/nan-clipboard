@@ -16,7 +16,7 @@ NAN_MODULE_INIT(Clipboard::Init) {
   ctor->InstanceTemplate()->SetInternalFieldCount(1);
   ctor->SetClassName(Nan::New("Clipboard").ToLocalChecked());
 
-  Nan::SetPrototypeMethod(ctor, "save", Save);
+  Nan::SetPrototypeMethod(ctor, "writeBitmapToDisk", WriteBitmapToDisk);
 
   // TODO: what does this do?
   target->Set(Nan::New("Clipboard").ToLocalChecked(), ctor->GetFunction());
@@ -50,7 +50,7 @@ std::wstring s2ws(const std::string& s)
     return r;
 }
 
-NAN_METHOD(Clipboard::Save)
+NAN_METHOD(Clipboard::WriteBitmapToDisk)
 {
   // named? parameters:
   // filename: filename (without extension) of image
@@ -68,6 +68,7 @@ NAN_METHOD(Clipboard::Save)
   //   return Nan::ThrowError(Nan::New("Vector::New - expected arguments to be numbers").ToLocalChecked());
   // }
 
+  // Validate parameters
   std::string temp = *v8::String::Utf8Value(info[0]->ToString());
   std::wstring filename = s2ws(temp);
 
