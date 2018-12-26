@@ -3,6 +3,8 @@
 #include <windows.h>
 #include <wincodec.h>
 
+using namespace v8;
+
 Nan::Persistent<v8::FunctionTemplate> Vector::constructor;
 
 NAN_MODULE_INIT(Vector::Init) {
@@ -112,6 +114,7 @@ NAN_SETTER(Vector::HandleSetters) {
 }
 
 NAN_METHOD(Vector::Save) {
+
     if (!OpenClipboard(NULL)) {
         return;
     }
@@ -144,12 +147,20 @@ NAN_METHOD(Vector::Save) {
         if (SUCCEEDED(hr)) {
           printf("Converted into a IWICBitmap!\n");
 
-          // Now let's look around
-
+          // Retrieve the width and height of the clipboard image
           UINT width, height;
           hr = ipBitmap->GetSize(&width, &height);
           sprintf(buffer, "width = %i, height = %i\n", width, height);
           printf(buffer);
+
+          // Compute the output image width and height by constraining
+          // the maximum width of the image to 800px.
+          // TODO: parameterize, but hard code to 800px for now
+          UINT final_width = 800;
+          UINT output_width, output_height;
+          float scaling_factor = (float)((float)final_width / (float)width);
+          output_width = final_width;
+          output_height = scaling_factor * height;
 
           // Now let's get a PngEncoder
           IWICBitmapEncoder* ipBitmapEncoder = NULL;
