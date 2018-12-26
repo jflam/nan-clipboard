@@ -12,5 +12,5 @@ console.log(vec2) // Vector { x: 30, y: 0, z: 100 }
 const vecSum = vec1.add(vec2)
 console.log(vecSum) // Vector { x: 50, y: 10, z: 100 }
 
-vec1.save()
+vec1.save('hi')
 console.log("made it here")
