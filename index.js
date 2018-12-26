@@ -1,6 +1,6 @@
 // this is how we will require our module
 const m = require('./')
 
-const vec1 = new m.Clipboard(20, 10, 0)
+const vec1 = new m.Clipboard()
 vec1.save('hi')
 console.log("made it here")
