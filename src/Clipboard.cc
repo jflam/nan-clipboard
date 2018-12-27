@@ -3,7 +3,9 @@
 #include <windows.h>
 #include <wincodec.h>
 #include <string>
+#include <sstream>
 #include <iostream>
+#include <iomanip>
 
 using namespace v8;
 
@@ -50,7 +52,14 @@ std::wstring s2ws(const std::string& s)
     return r;
 }
 
-void InternalWriteBitmapToDisk(std::wstring filename, std::string file_Format, int width_constraint, bool write_full)
+void RaiseError(std::string errorMessage, HRESULT hr)
+{
+  std::stringstream ss;
+  ss << errorMessage << "0x" << std::uppercase << std::setfill('0') << std::setw(8) << std::hex << hr;
+  Nan::ThrowError(Nan::New(ss.str()).ToLocalChecked());
+}
+
+void InternalWriteBitmapToDisk(std::wstring filename, std::string file_format, int width_constraint, bool write_full)
 {
   if (!OpenClipboard(NULL))
   {
@@ -58,133 +67,154 @@ void InternalWriteBitmapToDisk(std::wstring filename, std::string file_Format, i
   }
 
   HANDLE hBitmap = GetClipboardData(CF_BITMAP);
-  if (hBitmap != NULL)
+  if (hBitmap == NULL)
   {
-    // COM Fun
-    HRESULT hr = CoInitialize(NULL);
-    IWICImagingFactory *ipFactory = NULL;
-    hr = CoCreateInstance(CLSID_WICImagingFactory,
-                          NULL,
-                          CLSCTX_INPROC_SERVER,
-                          IID_IWICImagingFactory,
-                          reinterpret_cast<void **>(&ipFactory));
+    return;
+  }
+
+  HRESULT hr = CoInitialize(NULL);
+  hr = E_FAIL;
+  if (FAILED(hr))
+  {
+    return RaiseError("Failed to initialize COM: ", hr);
+  }
+
+  IWICImagingFactory *ipFactory = NULL;
+  hr = CoCreateInstance(CLSID_WICImagingFactory,
+                        NULL,
+                        CLSCTX_INPROC_SERVER,
+                        IID_IWICImagingFactory,
+                        reinterpret_cast<void **>(&ipFactory));
+  if (FAILED(hr))
+  {
+    return RaiseError("Failed to initialize WIC Imaging Factory object: ", hr);
+  }
+
+  IWICBitmap *ipBitmap = NULL;
+  hr = ipFactory->CreateBitmapFromHBITMAP(reinterpret_cast<HBITMAP>(hBitmap),
+                                          NULL,
+                                          WICBitmapIgnoreAlpha,
+                                          &ipBitmap);
+  if (FAILED(hr))
+  {
+    return RaiseError("Failed to construct a WIC Bitmap object from the HBITMAP from the clipboard: ", hr);
+  }
+
+  // Retrieve the width and height of the clipboard image
+  UINT width, height;
+  hr = ipBitmap->GetSize(&width, &height);
+  if (FAILED(hr))
+  {
+    return RaiseError("Could not get the width and height of the WIC Bitmap object: ", hr);
+  }
+
+  // Compute the output image width and height by constraining
+  // the maximum width of the image to 800px.
+  UINT output_width, output_height;
+  float scaling_factor = (float)((float)width_constraint / (float)width);
+  output_width = width_constraint;
+  output_height = scaling_factor * height;
+
+  // Now resize it using a WIC Bitmap Scaler object
+  IWICBitmapScaler *ipScaler = NULL;
+  hr = ipFactory->CreateBitmapScaler(&ipScaler);
+  if (FAILED(hr)) 
+  {
+    return RaiseError("Could not create a WIC Bitmap scaler object: ", hr);
+  }
+
+  hr = ipScaler->Initialize(ipBitmap,
+                            output_width,
+                            output_height,
+                            WICBitmapInterpolationModeHighQualityCubic);
+  if (FAILED(hr))
+  {
+    return RaiseError("Could not initialize the WIC Bitmap scaler object InterpolationMode High Quality Cubic: ", hr);
+  }
+
+  IWICBitmapEncoder *ipBitmapEncoder = NULL;
+  GUID encoderId = file_format == "png" ? GUID_ContainerFormatPng : GUID_ContainerFormatJpeg;
+  hr = ipFactory->CreateEncoder(encoderId,
+                                NULL,
+                                &ipBitmapEncoder);
+  if (FAILED(hr))
+  {
+    return RaiseError("Could not create the PNG or JPG encoder: ", hr);
+  }
+
+  IWICStream *ipStream = NULL;
+  hr = ipFactory->CreateStream(&ipStream);
+  if (FAILED(hr)) {
+    return RaiseError("Could not create an IStream object: ", hr);
+  }
+
+  hr = ipStream->InitializeFromFilename((filename + L"." + file_format).c_str(), GENERIC_WRITE);
+  if (FAILED(hr))
+  {
+    return RaiseError("Failed to initialize a writeable stream: ", hr);
+  }
+
+  hr = ipBitmapEncoder->Initialize(ipStream, WICBitmapEncoderNoCache);
+  if (FAILED(hr))
+  {
+    return RaiseError("Failed to initialize the bitmap encoder using the stream: ", hr);
+  }
+
+  IWICBitmapFrameEncode *ipFrameEncoder = NULL;
+  hr = ipBitmapEncoder->CreateNewFrame(&ipFrameEncoder, NULL);
+  if (FAILED(hr))
+  {
+    return RaiseError("Failed to create a new frame encoder using the bitmap encoder: ", hr);
+
+  }
+
+  hr = ipFrameEncoder->Initialize(NULL);
+  if (FAILED(hr))
+  {
+    return RaiseError("Failed to initialize the frame encoder: ", hr);
+  }
+
+  if (SUCCEEDED(hr))
+  {
+    std::cout << "Initialized the frame encoder\n";
+    hr = ipFrameEncoder->SetSize(output_width, output_height);
     if (SUCCEEDED(hr))
     {
-      std::cout << "Created IWICImagingFactory\n";
-
-      IWICBitmap *ipBitmap = NULL;
-      hr = ipFactory->CreateBitmapFromHBITMAP(reinterpret_cast<HBITMAP>(hBitmap),
-                                              NULL,
-                                              WICBitmapIgnoreAlpha,
-                                              &ipBitmap);
+      std::cout << "Set output size";
+      WICPixelFormatGUID formatGuid = GUID_WICPixelFormat24bppRGB;
+      hr = ipFrameEncoder->SetPixelFormat(&formatGuid);
       if (SUCCEEDED(hr))
       {
-        // Retrieve the width and height of the clipboard image
-        UINT width, height;
-        hr = ipBitmap->GetSize(&width, &height);
-        std::cout << "Converted into a IWICBitmap that is " << width << " by " << height << "\n";
-
-        // Compute the output image width and height by constraining
-        // the maximum width of the image to 800px.
-        // TODO: parameterize, but hard code to 800px for now
-        UINT final_width = 800;
-        UINT output_width, output_height;
-        float scaling_factor = (float)((float)final_width / (float)width);
-        output_width = final_width;
-        output_height = scaling_factor * height;
-
-        std::cout << "resizing bitmap to: " << output_width << " by " << output_height << "\n";
-
-        // Now resize it
-        IWICBitmapScaler *ipScaler = NULL;
-        hr = ipFactory->CreateBitmapScaler(&ipScaler);
+        std::cout << "Set pixel format to RGB 8 bits per channel\n";
+        hr = ipFrameEncoder->WriteSource(ipScaler, NULL);
         if (SUCCEEDED(hr))
         {
-          std::cout << "Created an IWICBitmapScaler\n";
-
-          hr = ipScaler->Initialize(ipBitmap,
-                                    output_width,
-                                    output_height,
-                                    WICBitmapInterpolationModeHighQualityCubic);
+          std::cout << "Set write source to the IWICBitamp object\n";
+          hr = ipFrameEncoder->Commit();
           if (SUCCEEDED(hr))
           {
-            std::cout << "Initialized it with the new output width and height\n";
-
-            IWICBitmapEncoder *ipBitmapEncoder = NULL;
-            hr = ipFactory->CreateEncoder(GUID_ContainerFormatPng,
-                                          NULL,
-                                          &ipBitmapEncoder);
+            std::cout << "Committed the frame encoder\n";
+            hr = ipBitmapEncoder->Commit();
             if (SUCCEEDED(hr))
             {
-              std::cout << "Retrieved a PNG encoder\n";
-
-              IWICStream *ipStream = NULL;
-              hr = ipFactory->CreateStream(&ipStream);
-              if (SUCCEEDED(hr))
-              {
-                std::cout << "Created an IWICStream from the encoder\n";
-                hr = ipStream->InitializeFromFilename((filename + L".png").c_str(), GENERIC_WRITE);
-                if (SUCCEEDED(hr))
-                {
-                  std::wcout << "Writing the image to this file: " << filename << ".png\n";
-                  hr = ipBitmapEncoder->Initialize(ipStream, WICBitmapEncoderNoCache);
-                  if (SUCCEEDED(hr))
-                  {
-                    std::cout << "Initialized the encoder with the stream and telling it to write to the image file!\n";
-                    IWICBitmapFrameEncode *ipFrameEncoder = NULL;
-                    hr = ipBitmapEncoder->CreateNewFrame(&ipFrameEncoder, NULL);
-                    if (SUCCEEDED(hr))
-                    {
-                      std::cout << "Got a IWICBitmapFrameEncode interface\n";
-                      hr = ipFrameEncoder->Initialize(NULL);
-                      if (SUCCEEDED(hr))
-                      {
-                        std::cout << "Initialized the frame encoder\n";
-                        hr = ipFrameEncoder->SetSize(output_width, output_height);
-                        if (SUCCEEDED(hr))
-                        {
-                          std::cout << "Set output size";
-                          WICPixelFormatGUID formatGuid = GUID_WICPixelFormat24bppRGB;
-                          hr = ipFrameEncoder->SetPixelFormat(&formatGuid);
-                          if (SUCCEEDED(hr))
-                          {
-                            std::cout << "Set pixel format to RGB 8 bits per channel\n";
-                            hr = ipFrameEncoder->WriteSource(ipScaler, NULL);
-                            if (SUCCEEDED(hr))
-                            {
-                              std::cout << "Set write source to the IWICBitamp object\n";
-                              hr = ipFrameEncoder->Commit();
-                              if (SUCCEEDED(hr))
-                              {
-                                std::cout << "Committed the frame encoder\n";
-                                hr = ipBitmapEncoder->Commit();
-                                if (SUCCEEDED(hr))
-                                {
-                                  std::cout << "Committed the bitmap encoder\n";
-                                }
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
+              std::cout << "Committed the bitmap encoder\n";
             }
           }
         }
       }
-      ipFactory->Release();
     }
-    CoUninitialize();
+    }
+      }
+    }
+    }
+    }
+    }
+    }
   }
-  else
-  {
-    std::cout << "No bitmap on clibpard\n";
-  }
-
-  return;
+}
+ipFactory->Release();
+CoUninitialize();
+return;
 }
 
 const std::string writeBitmapToDiskParameterError{"writeBitmapToDisk - expected arguments filename, file_format, width_constraint, write_full"};
