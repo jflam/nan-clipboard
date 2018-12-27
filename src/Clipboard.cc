@@ -50,28 +50,8 @@ std::wstring s2ws(const std::string& s)
     return r;
 }
 
-NAN_METHOD(Clipboard::WriteBitmapToDisk)
+void InternalWriteBitmapToDisk(std::wstring filename, std::string file_Format, int width_constraint, bool write_full)
 {
-  // named? parameters:
-  // filename: filename (without extension) of image
-  // file_format: png|jpg - selects the right version
-  // width_constraint: integer -
-  // serialize:
-
-  // SAMPLE CODE to check arguments
-  // if(info.Length() != 3) {
-  //   return Nan::ThrowError(Nan::New("Vector::New - expected arguments x, y, z").ToLocalChecked());
-  // }
-
-  // // expect arguments to be numbers
-  // if(!info[0]->IsNumber() || !info[1]->IsNumber() || !info[2]->IsNumber()) {
-  //   return Nan::ThrowError(Nan::New("Vector::New - expected arguments to be numbers").ToLocalChecked());
-  // }
-
-  // Validate parameters
-  std::string temp = *v8::String::Utf8Value(info[0]->ToString());
-  std::wstring filename = s2ws(temp);
-
   if (!OpenClipboard(NULL))
   {
     return;
@@ -205,4 +185,41 @@ NAN_METHOD(Clipboard::WriteBitmapToDisk)
   }
 
   return;
+}
+
+const std::string writeBitmapToDiskParameterError{"writeBitmapToDisk - expected arguments filename, file_format, width_constraint, write_full"};
+
+NAN_METHOD(Clipboard::WriteBitmapToDisk)
+{
+  // named? (TODO: make named via struct in the future) parameters:
+  // filename: filename (without extension) of image
+  // file_format: png|jpg|auto - selects the right serializer
+  // width_constraint: integer - when specified, it will 
+  // write_full: true|false - writes full sized image to disk with _f appended to filename
+
+  // Validate number of parameters
+  if (info.Length() != 4)
+  {
+    return Nan::ThrowError(Nan::New(writeBitmapToDiskParameterError).ToLocalChecked());
+  }
+
+  // Validate parameter types
+  if (!info[0]->IsString() || !info[1]->IsString() || !info[2]->IsNumber() || !info[3]->IsBoolean())
+  {
+    return Nan::ThrowError(Nan::New(writeBitmapToDiskParameterError).ToLocalChecked());
+  }
+
+  // Validate parameter values
+  std::wstring filename = s2ws(*v8::String::Utf8Value(Isolate::GetCurrent(), info[0]->ToString()));
+  std::string file_format = *v8::String::Utf8Value(Isolate::GetCurrent(), info[1]->ToString());
+  // TODO: figure out how to deal with deprecated Int32Value method
+  int width_constraint = info[2]->Int32Value();
+  bool write_full = info[3]->BooleanValue();
+
+  if (!(file_format == "png" || file_format == "jpg"))
+  {
+    return Nan::ThrowError(Nan::New("writeBitmapToDisk - file_format must be png|jpg").ToLocalChecked());
+  }
+
+  InternalWriteBitmapToDisk(filename, file_format, width_constraint, write_full);
 }
