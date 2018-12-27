@@ -59,7 +59,7 @@ void RaiseError(std::string errorMessage, HRESULT hr)
   Nan::ThrowError(Nan::New(ss.str()).ToLocalChecked());
 }
 
-void InternalWriteBitmapToDisk(std::wstring filename, std::string file_format, int width_constraint, bool write_full)
+void InternalWriteBitmapToDisk(std::wstring filename, std::wstring file_format, int width_constraint, bool write_full)
 {
   if (!OpenClipboard(NULL))
   {
@@ -73,13 +73,17 @@ void InternalWriteBitmapToDisk(std::wstring filename, std::string file_format, i
   }
 
   HRESULT hr = CoInitialize(NULL);
-  hr = E_FAIL;
   if (FAILED(hr))
   {
     return RaiseError("Failed to initialize COM: ", hr);
   }
 
   IWICImagingFactory *ipFactory = NULL;
+  IWICBitmapScaler *ipScaler = NULL;
+  IWICBitmapEncoder *ipBitmapEncoder = NULL;
+  IWICStream *ipStream = NULL;
+  IWICBitmapFrameEncode *ipFrameEncoder = NULL;
+
   hr = CoCreateInstance(CLSID_WICImagingFactory,
                         NULL,
                         CLSCTX_INPROC_SERVER,
@@ -116,7 +120,6 @@ void InternalWriteBitmapToDisk(std::wstring filename, std::string file_format, i
   output_height = scaling_factor * height;
 
   // Now resize it using a WIC Bitmap Scaler object
-  IWICBitmapScaler *ipScaler = NULL;
   hr = ipFactory->CreateBitmapScaler(&ipScaler);
   if (FAILED(hr)) 
   {
@@ -132,8 +135,7 @@ void InternalWriteBitmapToDisk(std::wstring filename, std::string file_format, i
     return RaiseError("Could not initialize the WIC Bitmap scaler object InterpolationMode High Quality Cubic: ", hr);
   }
 
-  IWICBitmapEncoder *ipBitmapEncoder = NULL;
-  GUID encoderId = file_format == "png" ? GUID_ContainerFormatPng : GUID_ContainerFormatJpeg;
+  GUID encoderId = file_format == L"png" ? GUID_ContainerFormatPng : GUID_ContainerFormatJpeg;
   hr = ipFactory->CreateEncoder(encoderId,
                                 NULL,
                                 &ipBitmapEncoder);
@@ -142,7 +144,6 @@ void InternalWriteBitmapToDisk(std::wstring filename, std::string file_format, i
     return RaiseError("Could not create the PNG or JPG encoder: ", hr);
   }
 
-  IWICStream *ipStream = NULL;
   hr = ipFactory->CreateStream(&ipStream);
   if (FAILED(hr)) {
     return RaiseError("Could not create an IStream object: ", hr);
@@ -160,12 +161,10 @@ void InternalWriteBitmapToDisk(std::wstring filename, std::string file_format, i
     return RaiseError("Failed to initialize the bitmap encoder using the stream: ", hr);
   }
 
-  IWICBitmapFrameEncode *ipFrameEncoder = NULL;
   hr = ipBitmapEncoder->CreateNewFrame(&ipFrameEncoder, NULL);
   if (FAILED(hr))
   {
     return RaiseError("Failed to create a new frame encoder using the bitmap encoder: ", hr);
-
   }
 
   hr = ipFrameEncoder->Initialize(NULL);
@@ -174,47 +173,63 @@ void InternalWriteBitmapToDisk(std::wstring filename, std::string file_format, i
     return RaiseError("Failed to initialize the frame encoder: ", hr);
   }
 
-  if (SUCCEEDED(hr))
+  hr = ipFrameEncoder->SetSize(output_width, output_height);
+  if (FAILED(hr))
   {
-    std::cout << "Initialized the frame encoder\n";
-    hr = ipFrameEncoder->SetSize(output_width, output_height);
-    if (SUCCEEDED(hr))
-    {
-      std::cout << "Set output size";
-      WICPixelFormatGUID formatGuid = GUID_WICPixelFormat24bppRGB;
-      hr = ipFrameEncoder->SetPixelFormat(&formatGuid);
-      if (SUCCEEDED(hr))
-      {
-        std::cout << "Set pixel format to RGB 8 bits per channel\n";
-        hr = ipFrameEncoder->WriteSource(ipScaler, NULL);
-        if (SUCCEEDED(hr))
-        {
-          std::cout << "Set write source to the IWICBitamp object\n";
-          hr = ipFrameEncoder->Commit();
-          if (SUCCEEDED(hr))
-          {
-            std::cout << "Committed the frame encoder\n";
-            hr = ipBitmapEncoder->Commit();
-            if (SUCCEEDED(hr))
-            {
-              std::cout << "Committed the bitmap encoder\n";
-            }
-          }
-        }
-      }
-    }
-    }
-      }
-    }
-    }
-    }
-    }
-    }
+    return RaiseError("Failed to set the output size for the frame encoder: ", hr);
   }
-}
-ipFactory->Release();
-CoUninitialize();
-return;
+
+  WICPixelFormatGUID formatGuid = GUID_WICPixelFormat24bppRGB;
+  hr = ipFrameEncoder->SetPixelFormat(&formatGuid);
+  if (FAILED(hr))
+  {
+    return RaiseError("Failed to set the pixel format (WICPixelFormat24bppRGB) for the frame encoder: ", hr);
+  }
+
+  hr = ipFrameEncoder->WriteSource(ipScaler, NULL);
+  if (FAILED(hr))
+  {
+    return RaiseError("Failed to set the write source of the frame encoder to the bitmap scaler: ", hr);
+  }
+
+  hr = ipFrameEncoder->Commit();
+  if (FAILED(hr)) 
+  {
+    return RaiseError("Failed to commit the frame encoder: ", hr);
+  }
+
+  hr = ipBitmapEncoder->Commit();
+  if (FAILED(hr))
+  {
+    return RaiseError("Failed to commit the bitmap encoder: ", hr);
+  }
+
+  if (ipStream != NULL)
+  {
+    ipStream->Release();
+  }
+
+  if (ipScaler != NULL)
+  {
+    ipScaler->Release();
+  }
+
+  if (ipBitmapEncoder != NULL)
+  {
+    ipBitmapEncoder->Release();
+  }
+
+  if (ipFrameEncoder != NULL)
+  {
+    ipFrameEncoder->Release();
+  }
+
+  if (ipFactory != NULL)
+  {
+    ipFactory->Release();
+  }
+
+  return CoUninitialize();
 }
 
 const std::string writeBitmapToDiskParameterError{"writeBitmapToDisk - expected arguments filename, file_format, width_constraint, write_full"};
@@ -241,12 +256,12 @@ NAN_METHOD(Clipboard::WriteBitmapToDisk)
 
   // Validate parameter values
   std::wstring filename = s2ws(*v8::String::Utf8Value(Isolate::GetCurrent(), info[0]->ToString()));
-  std::string file_format = *v8::String::Utf8Value(Isolate::GetCurrent(), info[1]->ToString());
+  std::wstring file_format = s2ws(*v8::String::Utf8Value(Isolate::GetCurrent(), info[1]->ToString()));
   // TODO: figure out how to deal with deprecated Int32Value method
   int width_constraint = info[2]->Int32Value();
   bool write_full = info[3]->BooleanValue();
 
-  if (!(file_format == "png" || file_format == "jpg"))
+  if (!(file_format == L"png" || file_format == L"jpg"))
   {
     return Nan::ThrowError(Nan::New("writeBitmapToDisk - file_format must be png|jpg").ToLocalChecked());
   }
