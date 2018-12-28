@@ -3,8 +3,8 @@
   "version": "0.0.1",
   "main": "bindings.js",
   "scripts": {
-    "build": "node-gyp build",
-    "install": "node-gyp rebuild",
+    "build": "node-gyp build -j 8",
+    "install": "node-gyp rebuild -j 8",
     "start": "node ./index.js"
   },
   "dependencies": {
